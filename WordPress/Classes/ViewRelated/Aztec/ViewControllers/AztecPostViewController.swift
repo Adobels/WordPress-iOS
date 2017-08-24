@@ -2667,26 +2667,23 @@ extension AztecPostViewController {
         return fileURL
     }
 
-    // TODO: Extract these strings into structs like other items
     fileprivate func displayActions(forAttachment attachment: MediaAttachment, position: CGPoint) {
         let mediaID = attachment.identifier
-        let title: String = NSLocalizedString("Media Options", comment: "Title for action sheet with media options.")
         var message: String?
-        let alertController = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
-        alertController.addActionWithTitle(NSLocalizedString("Dismiss", comment: "User action to dismiss media options."),
-                                           style: .cancel,
-                                           handler: { (action) in
-                                            if attachment == self.currentSelectedAttachment {
-                                                self.currentSelectedAttachment = nil
-                                                if (attachment is ImageAttachment) {
-                                                    attachment.overlayImage = nil
-                                                }
-                                                attachment.message = nil
-                                                self.richTextView.refresh(attachment)
-                                            }
-        })
+        let alertController = UIAlertController(title: MediaOptionsAlert.title, message: nil, preferredStyle: .actionSheet)
+        alertController.addCancelActionWithTitle(MediaOptionsAlert.dismissTitle) { action in
+            if attachment == self.currentSelectedAttachment {
+                self.currentSelectedAttachment = nil
+                if attachment is ImageAttachment {
+                    attachment.overlayImage = nil
+                }
+                attachment.message = nil
+                self.richTextView.refresh(attachment)
+            }
+        }
+
         if let imageAttachment = attachment as? ImageAttachment {
-            alertController.preferredAction = alertController.addActionWithTitle(NSLocalizedString("Details", comment: "User action to edit media details."),
+            alertController.preferredAction = alertController.addActionWithTitle(MediaOptionsAlert.detailsTitle,
                                                style: .default,
                                                handler: { (action) in
                                                 self.displayDetails(forAttachment: imageAttachment)
@@ -2694,50 +2691,45 @@ extension AztecPostViewController {
         } else if let videoAttachment = attachment as? VideoAttachment,
             mediaProgressCoordinator.error(forMediaID: mediaID) == nil,
             !mediaProgressCoordinator.isMediaUploading(mediaID: mediaID) {
-            alertController.preferredAction = alertController.addActionWithTitle(NSLocalizedString("Play Video", comment: "User action to play a video on the editor."),
+            alertController.preferredAction = alertController.addActionWithTitle(MediaOptionsAlert.playTitle,
                                                                                  style: .default,
                                                                                  handler: { (action) in
                                                                                     self.displayPlayerFor(videoAttachment: videoAttachment, atPosition: position)
             })
         }
 
-        // Is upload still going?
+        // Action: Stop Upload
         if let mediaProgress = mediaProgressCoordinator.progress(forMediaID: mediaID),
             mediaProgress.completedUnitCount < mediaProgress.totalUnitCount {
-            alertController.addActionWithTitle(NSLocalizedString("Stop Upload", comment: "User action to stop upload."),
-                                               style: .destructive,
-                                               handler: { (action) in
-                                                mediaProgress.cancel()
-                                                self.richTextView.remove(attachmentID: mediaID)
-            })
+            alertController.addDestructiveActionWithTitle(MediaOptionsAlert.stopUploadTitle) { action in
+                mediaProgress.cancel()
+                self.richTextView.remove(attachmentID: mediaID)
+            }
         } else {
+            // Action: Retry Upload
             if let error = mediaProgressCoordinator.error(forMediaID: mediaID) {
                 message = error.localizedDescription
-                alertController.addActionWithTitle(NSLocalizedString("Retry Upload", comment: "User action to retry media upload."),
-                                                   style: .default,
-                                                   handler: { (action) in
-                                                    //retry upload
-                                                    if let media = self.mediaProgressCoordinator.object(forMediaID: mediaID) as? Media,
-                                                        let attachment = self.richTextView.attachment(withId: mediaID) {
-                                                        if (attachment is ImageAttachment) {
-                                                            attachment.overlayImage = nil
-                                                        }
-                                                        attachment.message = nil
-                                                        attachment.progress = 0
-                                                        self.richTextView.refresh(attachment)
-                                                        self.mediaProgressCoordinator.track(numberOfItems: 1)
+                alertController.addDefaultActionWithTitle(MediaOptionsAlert.retryUploadTitle) { action in
+                    if let media = self.mediaProgressCoordinator.object(forMediaID: mediaID) as? Media,
+                        let attachment = self.richTextView.attachment(withId: mediaID) {
+                        if (attachment is ImageAttachment) {
+                            attachment.overlayImage = nil
+                        }
+                        attachment.message = nil
+                        attachment.progress = 0
+                        self.richTextView.refresh(attachment)
+                        self.mediaProgressCoordinator.track(numberOfItems: 1)
 
-                                                        WPAppAnalytics.track(.editorUploadMediaRetried, withProperties: [WPAppAnalyticsKeyEditorSource: Analytics.editorSource], with: self.post.blog)
+                        WPAppAnalytics.track(.editorUploadMediaRetried, withProperties: [WPAppAnalyticsKeyEditorSource: Analytics.editorSource], with: self.post.blog)
 
-                                                        self.upload(media: media, mediaID: mediaID)
-                                                    }
-                })
+                        self.upload(media: media, mediaID: mediaID)
+                    }
+                }
             }
-            alertController.addActionWithTitle(NSLocalizedString("Remove Media", comment: "User action to remove media."),
-                                               style: .destructive,
-                                               handler: { (action) in
-                                                self.richTextView.remove(attachmentID: mediaID)
-            })
+
+            alertController.addDestructiveActionWithTitle(MediaOptionsAlert.removeTitle) { action in
+                self.richTextView.remove(attachmentID: mediaID)
+            }
         }
 
         alertController.title = title
@@ -2745,9 +2737,10 @@ extension AztecPostViewController {
         alertController.popoverPresentationController?.sourceView = richTextView
         alertController.popoverPresentationController?.sourceRect = CGRect(origin: position, size: CGSize(width: 1, height: 1))
         alertController.popoverPresentationController?.permittedArrowDirections = .any
-        present(alertController, animated:true, completion: { () in
+
+        present(alertController, animated: true) { _ in
             UIMenuController.shared.setMenuVisible(false, animated: false)
-        })
+        }
     }
 
     func displayDetails(forAttachment attachment: ImageAttachment) {
@@ -3148,6 +3141,17 @@ extension AztecPostViewController {
         static let message = NSLocalizedString("Some media uploads failed. This action will remove all failed media from the post.\nSave anyway?", comment: "Confirms with the user if they save the post all media that failed to upload will be removed from it.")
         static let acceptTitle  = NSLocalizedString("Yes", comment: "Accept Action")
         static let cancelTitle  = NSLocalizedString("Not Now", comment: "Nicer dialog answer for \"No\".")
+    }
+
+
+    struct MediaOptionsAlert {
+        static let title = NSLocalizedString("Media Options", comment: "Title for action sheet with media options.")
+        static let dismissTitle = NSLocalizedString("Dismiss", comment: "User action to dismiss media options.")
+        static let detailsTitle = NSLocalizedString("Details", comment: "User action to edit media details.")
+        static let playTitle = NSLocalizedString("Play Video", comment: "User action to play a video on the editor.")
+        static let removeTitle = NSLocalizedString("Remove Media", comment: "User action to remove media.")
+        static let stopUploadTitle = NSLocalizedString("Stop Upload", comment: "User action to stop upload.")
+        static let retryUploadTitle = NSLocalizedString("Retry Upload", comment: "User action to retry media upload.")
     }
 
     struct MediaUploadingCancelAlert {
